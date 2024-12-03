@@ -1,12 +1,11 @@
-import io
 import pygame
 import sys
-import os
 import json
-import numpy as np
-import matplotlib.pyplot as plt
-from PIL import Image
-from tkinter import Tk, filedialog
+from tkinter import W, Tk, filedialog
+
+# Window dimensions
+WINDOW_WIDTH = 1200
+WINDOW_HEIGHT = 600
 from agent import Agent
 from wall import Wall
 from button import Button
@@ -19,28 +18,12 @@ from constants import (
     RED,
     BLACK,
 )
-from controller_random import RandomController
+from controller_astar import ControllerAStar
+from controller_basic import ControllerBasic
+from controller_random import ControllerRandom
 from text_input import TextInput
 
-from AlabiHippocampalModel.layers.head_direction_layer import HeadDirectionLayer
-from AlabiHippocampalModel.layers.boundary_vector_cell_layer import (
-    BoundaryVectorCellLayer,
-)
-
-
-# General function to convert any Matplotlib plot to a Pygame surface
-def plot_to_surface(fig):
-    """Converts a Matplotlib figure to a Pygame surface."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png")  # Save plot to buffer as a PNG
-    plt.close(fig)  # Close the plot
-    buf.seek(0)
-    img = Image.open(buf)
-    img = img.resize((400, 300))  # Resize to fit the Pygame window space
-    return pygame.image.fromstring(img.tobytes(), img.size, img.mode)
-
-
-def load_walls_file_dialogue():
+def load_environment_file_dialogue():
     """
     Uses the tkinter file dialogue to select the file to open.
     Calls open_walls after file selected.
@@ -48,25 +31,49 @@ def load_walls_file_dialogue():
     global root
     root = Tk()
     root.withdraw()
-    load_walls(
+    load_environment(
         filedialog.askopenfilename(
             defaultextension=".json", filetypes=[("JSON files", "*.json")]
         )
     )
+    root.destroy()
 
 
-def load_walls(filename):
+def load_environment(filename):
     """
-    Takes the file name and loads in the file.
+    Takes the file name and loads the environment.
     Puts all wall objects into the wall object and updates agent's internal memory.
     """
-    global agent
-    global walls
+    walls = []
+    agent = None
+
     if filename:
         with open(filename, "r") as f:
-            walls = [Wall.from_dict(data) for data in json.load(f)]
-        walls = walls
-        agent.walls = walls
+            world_data = json.load(f)
+
+            # Load walls safely
+            if "walls" in world_data:
+                walls = [
+                    Wall.from_dict(wall_data["wall"])
+                    for wall_data in world_data["walls"]
+                ]
+
+            # Load agent safely
+            if "agent" in world_data and world_data["agent"]:
+                agent_data = world_data["agent"]["agent"]
+                agent = Agent(
+                    x=agent_data.get("x", 200),  # Default position if missing
+                    y=agent_data.get("y", 200),
+                    direction=agent_data.get("direction", 0),
+                    walls=walls,
+                    body_radius=agent_data.get("radius", 20),
+                )
+            else:
+                # Default agent creation if no agent is defined
+                agent = Agent(x=200, y=200, direction=0, walls=walls, body_radius=20)
+
+    return walls, agent
+
 
 
 def toggle_laser():
@@ -84,6 +91,7 @@ def toggle_controller_running():
         True,
         GREEN if controller.running else RED,
     )
+    print(f"Controller running: {controller.running}")  # Print state after toggling
 
 
 def set_clock_rate():
@@ -101,11 +109,15 @@ def set_max_speed():
     global clock_rate, clock, max_speed, text_surfaces, previous_clock_rate
     if max_speed:
         max_speed = False
-        clock_rate = previous_clock_rate
+        if previous_clock_rate > 0:  # Only restore if we had a valid previous rate
+            clock_rate = previous_clock_rate
+        else:
+            clock_rate = 60  # Default to 60 if no valid previous rate
         text_surfaces[6] = font.render(f"Clock Rate: {clock_rate}", True, BLACK)
     else:
         max_speed = True
-        previous_clock_rate = clock_rate
+        if clock_rate > 0:  # Only save the previous rate if it's valid
+            previous_clock_rate = clock_rate
         clock_rate = 0
         text_surfaces[6] = font.render("Clock Rate: MAX", True, BLACK)
 
@@ -117,47 +129,38 @@ pygame.init()
 clock = pygame.time.Clock()
 
 # Set up the display window
-screen = pygame.display.set_mode((1600, 600))
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 pygame.display.set_caption("Simulation Window")
 
-# Define core components of sim
-walls = []
-agent = Agent(x=400, y=300, direction=0, walls=walls)
-controller = RandomController(model=None, agent=agent)
+# Load in walls and agent
+walls, agent = load_environment("worlds/test1.json")
+# Assuming walls are loaded and you have a grid representation
+grid_size = 20  # Define the size of the grid (adjust as necessary)
+grid = [[0 for _ in range(grid_size)] for _ in range(grid_size)]
 
-# Load in walls
-load_walls("worlds/test3.json")
+
+controller = ControllerAStar(agent, walls)
 
 # Define clock rate variable
 clock_rate = 60
 previous_clock_rate = clock_rate
 max_speed = False
 
-hd_layer = HeadDirectionLayer(num_cells=8, theta_0=0.0, unit="degree")
-bvc_layer = BoundaryVectorCellLayer(
-    max_dist=300,
-    input_dim=360,
-    n_hd=8,
-    sigma_ang=90,
-    sigma_d=20,
-)
-
 # Define buttons
 buttons = [
-    Button(850, 50, 100, 50, "Load Walls", load_walls_file_dialogue),
+    Button(850, 50, 100, 50, "Load World", load_environment_file_dialogue),
     Button(850, 110, 100, 50, "See LiDAR", toggle_laser),
-    Button(850, 170, 100, 50, "Toggle Controller", toggle_controller_running),
+    Button(850, 170, 100, 50, "Controller", toggle_controller_running),
     Button(850, 230, 100, 50, "Set Clock Rate", set_clock_rate),
     Button(850, 290, 100, 50, "Max Speed", set_max_speed),
 ]
-
 
 clock_rate_input = TextInput(x=960, y=230, width=50, height=50)
 
 # Define on-screen text that renders in a block
 font = pygame.font.Font(None, 24)
 text_surfaces = [
-    font.render("Load Wall Shortcut: u", True, BLACK),
+    font.render("Load World Shortcut: u", True, BLACK),
     font.render("See LiDAR Shortcut: i", True, BLACK),
     font.render("Quit sim shortcut: q", True, BLACK),
     font.render("Toggle Controller: c", True, BLACK),
@@ -170,68 +173,6 @@ text_surfaces = [
     font.render(f"Clock Rate: {clock_rate}", True, BLACK),
     font.render("Actual Speed: Calculating...", True, BLACK),
 ]
-
-
-# Define the RadioButton class
-class RadioButton:
-    def __init__(self, x, y, radius, label, action):
-        self.x = x
-        self.y = y
-        self.radius = radius
-        self.selected = False
-        self.label = label
-        self.action = action
-
-    def draw(self, surface):
-        pygame.draw.circle(
-            surface, BLACK, (self.x, self.y), self.radius, 2
-        )  # Outer circle
-        if self.selected:
-            pygame.draw.circle(
-                surface, BLACK, (self.x, self.y), self.radius - 5
-            )  # Filled circle if selected
-
-        label_surface = font.render(self.label, True, BLACK)
-        surface.blit(label_surface, (self.x + 20, self.y - 10))
-
-    def is_clicked(self, pos):
-        # Check if the radio button is clicked
-        return (self.x - pos[0]) ** 2 + (self.y - pos[1]) ** 2 <= self.radius**2
-
-
-# Define a function to deselect all radio buttons
-def deselect_all_radio_buttons(radio_buttons):
-    for button in radio_buttons:
-        button.selected = False
-
-
-# Define radio button actions
-def no_plot_action():
-    global selected_plot
-    selected_plot = "no_plot"
-
-
-def bvc_activation_action():
-    global selected_plot
-    selected_plot = "bvc_activation"
-
-
-def hdc_activation_action():
-    global selected_plot
-    selected_plot = "hdc_activation"
-
-
-# Define the radio buttons
-radio_buttons = [
-    RadioButton(870, 360, 10, "No Plot", no_plot_action),
-    RadioButton(870, 390, 10, "BVC Activation", bvc_activation_action),
-    RadioButton(870, 420, 10, "HDC Activation", hdc_activation_action),
-]
-
-# Initial selected plot
-selected_plot = "no_plot"
-radio_buttons[0].selected = True  # Default to "No Plot"
-
 
 # Main game loop
 running = True
@@ -251,17 +192,13 @@ while running:
             if event.key == pygame.K_m:
                 buttons[4].action()
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            # Check for button clicks
             for button in buttons:
                 if button.is_clicked(event.pos):
                     button.action()
-
-            # Check for radio button clicks
-            for radio_button in radio_buttons:
-                if radio_button.is_clicked(event.pos):
-                    deselect_all_radio_buttons(radio_buttons)
-                    radio_button.selected = True
-                    radio_button.action()
+                print(f"Controller running: {controller.running}")
+                mouse_pos = pygame.mouse.get_pos()
+                controller.handle_input(mouse_pos)
+                controller.set_goal(mouse_pos)
 
         clock_rate_input.handle_event(event)
 
@@ -290,8 +227,7 @@ while running:
     agent.scan()
 
     # Controller does its work
-    controller.handle_input()
-    controller.move_agent()
+    controller.update()
 
     # Draw the walls
     for wall in walls:
@@ -300,42 +236,16 @@ while running:
     # Draw the agent
     agent.draw(screen)
 
-    # Display plot based on the selected radio button
-    if selected_plot == "bvc_activation":
-        fig = bvc_layer.plot_activation(
-            np.array(agent.lidar_ranges),
-            np.deg2rad(np.array(agent.lidar_angles)),
-            return_plot=True,
-        )
-        plot_surface = plot_to_surface(fig)
-        screen.blit(plot_surface, (1200, 100))
-    elif selected_plot == "hdc_activation":
-        activations = hd_layer.get_head_direction_activation(theta_i=agent.direction)
-        fig = hd_layer.plot_activation(plot_type="radial", return_plot=True)
-        plot_surface = plot_to_surface(fig)
-        screen.blit(plot_surface, (1200, 100))
-    else:
-        # Draw a light grey square with "No plot rendered" text
-        pygame.draw.rect(screen, (200, 200, 200), (1200, 100, 400, 300))  # Grey square
-        no_plot_surface = font.render("No plot rendered", True, BLACK)
-        screen.blit(
-            no_plot_surface, (1400 - no_plot_surface.get_width() // 2, 250)
-        )  # Center text
-
     # Draw the buttons
     for button in buttons:
         button.draw(screen)
-
-    # Draw radio buttons
-    for radio_button in radio_buttons:
-        radio_button.draw(screen)
 
     # Draw text input
     clock_rate_input.update()
     clock_rate_input.draw(screen)
 
     # Draw text
-    x, y = 1300, 400
+    x, y = WINDOW_WIDTH - 300, WINDOW_HEIGHT - 200
     for surface in text_surfaces:
         screen.blit(surface, (x, y))
         y += 20
