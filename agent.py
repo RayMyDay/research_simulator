@@ -24,6 +24,7 @@ class Agent:
         direction: float,
         walls: list,
         num_lidar_beams: int = 360,
+        body_radius=20,
     ) -> None:
         """
         Initialize the Agent.
@@ -39,7 +40,7 @@ class Agent:
         self.y = y
         self.direction = direction  # in degrees
         self.linear_speed = 10
-        self.body_radius = 20
+        self.body_radius = body_radius
         self.angular_speed = 5
         self.lidar_max_range = 2000
         self.lidar_angles = [
@@ -182,6 +183,50 @@ class Agent:
             return collision_x, collision_y, boundary_distance
 
         return end_x, end_y, self.lidar_max_range
+    
+    def move_towards(self, target_x, target_y):
+        # Calculate the direction vector
+        direction_x = target_x - self.x
+        direction_y = target_y - self.y
+        distance = math.sqrt(direction_x ** 2 + direction_y ** 2)
+
+        if distance == 0:
+            print("Agent already at the target position.")
+            return
+
+        # Normalize the direction vector
+        direction_x /= distance
+        direction_y /= distance
+
+        # Adaptive speed: slower when close to the target
+        speed = min(self.linear_speed, distance)
+        print(f"Moving with speed {speed} towards ({target_x}, {target_y}). Current position: ({self.x}, {self.y})")
+
+        # Predict next position
+        next_x = self.x + direction_x * speed
+        next_y = self.y + direction_y * speed
+
+        # Check for collisions before moving
+        if not self.will_collide(next_x, next_y):
+            print(f"Agent moving from ({self.x}, {self.y}) to ({next_x}, {next_y}).")
+            self.x = next_x
+            self.y = next_y
+        else:
+            print(f"Movement blocked by obstacle at ({next_x}, {next_y}). Current position remains: ({self.x}, {self.y}).")
+
+
+    def will_collide(self, next_x, next_y):
+        # Check boundary collision
+        if (not (LEFT_BOUNDARY + self.body_radius <= next_x <= RIGHT_BOUNDARY - self.body_radius) or
+            not (TOP_BOUNDARY + self.body_radius <= next_y <= BOTTOM_BOUNDARY - self.body_radius)):
+            return True
+
+        # Check wall collisions
+        for wall in self.walls:
+            if wall.is_colliding(next_x, next_y, self.body_radius):
+                return True
+
+        return False
 
     def detect_collision(self, move_forward: bool = True) -> bool:
         """
@@ -221,26 +266,22 @@ class Agent:
 
     def try_move(self, move_forward: bool = True) -> None:
         """
-        Attempt to move the agent, reducing speed if necessary to avoid collisions.
+        Attempt to move the agent. Sets bump sensor if collision is detected.
 
         Args:
             move_forward (bool): True if moving forward, False if moving backward.
         """
-        original_speed = self.linear_speed
-        while self.linear_speed > 0:
-            if not self.detect_collision(move_forward):
-                if move_forward:
-                    self.x += self.linear_speed * math.cos(math.radians(self.direction))
-                    self.y -= self.linear_speed * math.sin(math.radians(self.direction))
-                else:
-                    self.x -= self.linear_speed * math.cos(math.radians(self.direction))
-                    self.y += self.linear_speed * math.sin(math.radians(self.direction))
-                self.bump_sensor = False
-                break
-            self.linear_speed -= 0.1
-        self.linear_speed = original_speed
-        if self.linear_speed <= 0:
+        if self.detect_collision(move_forward):
             self.bump_sensor = True
+            return
+
+        if move_forward:
+            self.x += self.linear_speed * math.cos(math.radians(self.direction))
+            self.y -= self.linear_speed * math.sin(math.radians(self.direction))
+        else:
+            self.x -= self.linear_speed * math.cos(math.radians(self.direction))
+            self.y += self.linear_speed * math.sin(math.radians(self.direction))
+        self.bump_sensor = False
 
     def rotate_left(self) -> None:
         """

@@ -1,0 +1,1 @@
+{"walls": [{"wall": {"x": 262, "y": 122, "width": 343, "height": 50}}, {"wall": {"x": 558, "y": 166, "width": 50, "height": 430}}, {"wall": {"x": 255, "y": 170, "width": 50, "height": 430}}], "agent": {"agent": {"x": 98, "y": 498, "direction": 0, "radius": 35.22782990761707}}}

@@ -43,7 +43,7 @@ class ControllerAStar:
 
     def is_valid_position(self, position):
         x, y = position
-        BUFFER_DISTANCE = 5  # Define the buffer distance from walls
+        BUFFER_DISTANCE = 10  # Define the buffer distance from walls
 
         # Check boundaries
         if not (LEFT_BOUNDARY + BUFFER_DISTANCE <= x <= RIGHT_BOUNDARY - BUFFER_DISTANCE and

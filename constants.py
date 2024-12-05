@@ -14,3 +14,10 @@ RIGHT_BOUNDARY = 800
 TOP_BOUNDARY = 0
 BOTTOM_BOUNDARY = 600
 
+# Movement constants
+MOVE_LEFT = "left"
+MOVE_RIGHT = "right"
+MOVE_UP = "up"
+MOVE_DOWN = "down"
+
+
